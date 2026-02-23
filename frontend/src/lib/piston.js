@@ -1,43 +1,55 @@
-// Piston API is a service for code execution
+// Wandbox API for code execution (free, no API key required)
 
-const PISTON_API = "https://emkc.org/api/v2/piston";
+const WANDBOX_API = "https://wandbox.org/api";
 
-const LANGUAGE_VERSIONS = {
-  javascript: { language: "javascript", version: "18.15.0" },
-  python: { language: "python", version: "3.10.0" },
-  java: { language: "java", version: "15.0.2" },
+const COMPILER_MAP = {
+  javascript: "nodejs-20.17.0",
+  python: "cpython-3.10.15",
+  java: "openjdk-jdk-22+36",
 };
 
 /**
+ * Clean code by removing non-printable characters
+ * @param {string} code - source code
+ * @returns {string} - cleaned code
+ */
+function cleanCode(code) {
+  return code
+    .replace(/\u00A0/g, " ")
+    .replace(/\u200B/g, "")
+    .replace(/\u200C/g, "")
+    .replace(/\u200D/g, "")
+    .replace(/\uFEFF/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+}
+
+/**
  * @param {string} language - programming language
- * @param {string} code - source code to executed
+ * @param {string} code - source code to execute
  * @returns {Promise<{success:boolean, output?:string, error?: string}>}
  */
 export async function executeCode(language, code) {
   try {
-    const languageConfig = LANGUAGE_VERSIONS[language];
+    const compiler = COMPILER_MAP[language];
 
-    if (!languageConfig) {
+    if (!compiler) {
       return {
         success: false,
-        error: `Unsupported language: ${language}`,
+        error: `Unsupported language: ${language}. Supported: javascript, python, java`,
       };
     }
 
-    const response = await fetch(`${PISTON_API}/execute`, {
+    const cleanedCode = cleanCode(code);
+
+    const response = await fetch(`${WANDBOX_API}/compile.json`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        language: languageConfig.language,
-        version: languageConfig.version,
-        files: [
-          {
-            name: `main.${getFileExtension(language)}`,
-            content: code,
-          },
-        ],
+        compiler: compiler,
+        code: cleanedCode,
       }),
     });
 
@@ -50,20 +62,21 @@ export async function executeCode(language, code) {
 
     const data = await response.json();
 
-    const output = data.run.output || "";
-    const stderr = data.run.stderr || "";
+    const compilerError = data.compiler_error || "";
+    const programError = data.program_error || "";
+    const programOutput = data.program_output || data.program_message || "";
 
-    if (stderr) {
+    if (compilerError || programError) {
       return {
         success: false,
-        output: output,
-        error: stderr,
+        output: programOutput.trim(),
+        error: compilerError || programError,
       };
     }
 
     return {
       success: true,
-      output: output || "No output",
+      output: programOutput.trim() || "No output",
     };
   } catch (error) {
     return {
